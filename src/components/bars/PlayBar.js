@@ -13,22 +13,30 @@ class PlayBar extends Component {
         this.handleMenuClick = () => {
             let template = [
                 {
-                    label: '&Pass',
-                    click: () => sabaki.makeMove([-1, -1], {sendToEngine: true})
-                },
-                {
-                    label: '&Resign',
-                    click: () => sabaki.makeResign()
+                    label: '棋局信息',
+                    click: () => sabaki.openDrawer('info')
                 },
                 {type: 'separator'},
                 {
-                    label: 'Es&timate',
+                    label: '停一手',
+                    click: () => sabaki.makeMove([-1, -1], {sendToEngine: true})
+                },
+                {
+                    label: '认输',
+                    click: () => sabaki.makeResign()
+                }//,
+                /*
+                {type: 'separator'},
+                {
+                    label: '评估局势',
                     click: () => sabaki.setMode('estimator')
                 },
                 {
-                    label: '&Score',
+                    label: '计算胜负',
                     click: () => sabaki.setMode('scoring')
-                },
+                }//,
+                */
+                /*
                 {
                     label: '&Edit',
                     click: () => sabaki.setMode('edit')
@@ -37,11 +45,8 @@ class PlayBar extends Component {
                     label: '&Find',
                     click: () => sabaki.setMode('find')
                 },
-                {type: 'separator'},
-                {
-                    label: '&Info',
-                    click: () => sabaki.openDrawer('info')
-                }
+                */                
+                
             ]
 
             let {left, top} = this.menuButtonElement.getBoundingClientRect()
@@ -93,14 +98,14 @@ class PlayBar extends Component {
                 h('span', {
                     class: classNames('name', {engine: isEngine[0]}),
                     title: isEngine[0] && 'Engine'
-                }, playerNames[0] || 'Black')
+                }, playerNames[0] || '黑方')
             ),
 
             h('span', {id: 'player_-1'},
                 h('span', {
                     class: classNames('name', {engine: isEngine[1]}),
                     title: isEngine[1] && 'Engine'
-                }, playerNames[1] || 'White'), ' ',
+                }, playerNames[1] || '白方'), ' ',
 
                 playerRanks[1] && h('span', {class: 'rank'}, playerRanks[1]), ' ',
                 h('span', {class: 'captures', style: captureStyle(1)}, playerCaptures[1])
@@ -110,8 +115,8 @@ class PlayBar extends Component {
                 src: `./img/ui/player_${currentPlayer}.svg`,
                 class: 'current-player',
                 height: 22,
-                title: 'Change Player',
-                onClick: onCurrentPlayerClick
+                title: ''//'Change Player',
+                //onClick: onCurrentPlayerClick
             }),
 
             h('div', {class: 'hotspot', title: 'Hotspot'}),
