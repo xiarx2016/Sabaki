@@ -36,6 +36,8 @@ class CommentTitle extends Component {
         let {treePosition: [tree, index], board} = this.props
         let node = tree.nodes[index]
 
+        //debugger//xiarx                
+        
         // Determine root node
 
         if (!tree.parent && index === 0) {
@@ -50,7 +52,7 @@ class CommentTitle extends Component {
 
             let today = new Date()
             if (today.getDate() === 25 && today.getMonth() === 3)
-                return 'Happy Birthday, Sabaki!'
+                return '生日快乐, 奇思围棋!'
         }
 
         // Determine end of main variation and show game result
@@ -61,7 +63,7 @@ class CommentTitle extends Component {
             let rootNode = gametree.getRoot(tree).nodes[0]
 
             if ('RE' in rootNode && rootNode.RE[0].trim() !== '')
-                return 'Result: ' + rootNode.RE[0]
+                return '结果: ' + rootNode.RE[0]
         }
 
         // Determine capture
@@ -97,10 +99,10 @@ class CommentTitle extends Component {
         title
     }) {
         let moveData = {
-            '-1': ['Bad move', 'badmove'],
-            '0': ['Doubtful move', 'doubtfulmove'],
-            '1': ['Interesting move', 'interestingmove'],
-            '2': ['Good move', 'goodmove']
+            '-1': ['坏棋', 'badmove'],
+            '0': ['疑问手', 'doubtfulmove'],
+            '1': ['有趣的一手', 'interestingmove'],
+            '2': ['好棋', 'goodmove']
         }
 
         if (mv > 1) {
@@ -110,10 +112,10 @@ class CommentTitle extends Component {
         }
 
         let positionData = {
-            '-1': ['Good for white', 'white'],
+            '-1': ['白好', 'white'],
             '0': ['Even position', 'balance'],
-            '1': ['Good for black', 'black'],
-            '-2': ['Unclear position', 'unclear']
+            '1': ['黑好', 'black'],
+            '-2': ['这里看不清', 'unclear']
         }
 
         if (pv > 1) {
@@ -152,7 +154,7 @@ class CommentTitle extends Component {
             h('img', {
                 src: './node_modules/octicons/build/svg/pencil.svg',
                 class: 'edit-button',
-                title: 'Edit',
+                title: '修改棋局文件',
                 width: 16,
                 height: 16,
                 onClick: this.handleEditButtonClick
@@ -299,8 +301,8 @@ class CommentBox extends Component {
                         ref: el => this.menuButtonElement = el,
                         src: './node_modules/octicons/build/svg/chevron-down.svg',
                         width: 16,
-                        height: 16,
-                        onClick: this.handleMenuButtonClick
+                        height: 16//,
+                        //onClick: this.handleMenuButtonClick
                     }),
 
                     h('div', {},
@@ -309,7 +311,7 @@ class CommentBox extends Component {
                             type: 'text',
                             name: 'title',
                             value: title,
-                            placeholder: 'Title',
+                            placeholder: '标题',
                             onInput: this.handleCommentInput
                         })
                     )
@@ -317,7 +319,7 @@ class CommentBox extends Component {
 
                 h('textarea', {
                     ref: el => this.textareaElement = el,
-                    placeholder: 'Comment',
+                    placeholder: '注解',
                     value: comment,
                     onInput: this.handleCommentInput
                 })

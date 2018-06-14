@@ -29,6 +29,26 @@ const setting = remote.require('./setting')
 const {sgf} = fileformats
 const sound = require('../modules/sound')
 
+//xiarx 
+//2018.06.14 复盘时，黑方白方选手都显示为棋思智能棋盘
+//           废弃函数getColorByStep，以getColorByNode取代
+//           增加了对phoenixGo引擎的支持
+//2018.06.13 修正了死活题中，可能存在应该黑先,但this.state.currentPlayer却是-1等现象引发的不会发出命令的错误，
+//           以及切换当前树后的黑白交替和play、guess切换的错误
+//2018.06.08 增加对死后题其他分支的支持，及结果提示文字返回
+//2018.06.06 1 增加全局对象this.qsgo，增加变量不再放在this.state下，减少对原有程序的影响
+//           2 增加远程死后题其它分支的支持
+//2018.06.05 增加远程死活题
+//2018.05.29 增加了打开sgf文件复盘的功能
+//           增加远程复盘功能
+
+
+//socket server
+const net = require('net');
+const SocketListenPort = 7003;//监听端口
+const {Command} = require('../modules/gtp')
+/////////////////////////////////////
+
 class App extends Component {
     constructor() {
         super()
@@ -104,7 +124,8 @@ class App extends Component {
             // Info Overlay
 
             infoOverlayText: '',
-            showInfoOverlay: false
+            showInfoOverlay: false            
+
         }
 
         this.events = new EventEmitter()
@@ -122,12 +143,31 @@ class App extends Component {
             fileformats, gametree, gtp, helper, setting, sound}
 
         // Bind state to settings
-
         setting.events.on('change', ({key}) => this.updateSettingState(key))
         this.updateSettingState()
+
+        if (setting.get('debug.renderDev_tools')) {
+            window.openDevTools()
+        } 
+
+        //增加一个全局对象,存放相关的全局变量
+        this.qsgo = {
+        	gameOverFlag : false , 
+        	currentAction : '' , 
+        	currentFile : '' ,         	
+        	currentStep : 0 , //切换树时，会清零        	
+        	currentTree : [emptyTree] ,	
+			currentBrotherTrees  : [emptyTree] , 
+			currentVertexOptions : '' , 
+			exerciseResult : 'R' ,//不准确，目前暂时不用
+			guessPlayer : 'B' //做题方，死活题中谁先走，谁就是做题方
+
+        }
+        
     }
 
-    componentDidMount() {
+    componentDidMount() {    	
+
         window.addEventListener('contextmenu', evt => {
             evt.preventDefault()
         })
@@ -187,6 +227,9 @@ class App extends Component {
         for (let el of document.querySelectorAll('#main main, #graph')) {
             el.addEventListener('wheel', evt => {
                 evt.preventDefault()
+                
+                //debugger//测试鼠标滚动事件 
+                if (!this.state.showCommentBox) return//added by xiarx 只有打开注解页面时(复盘)才允许滚轮起作用
 
                 if (this.residueDeltaY == null) this.residueDeltaY = 0
                 this.residueDeltaY += evt.deltaY
@@ -214,8 +257,16 @@ class App extends Component {
             if (evt.keyCode === 27) {
                 // Escape
 
+                if(!["NewFile","newGameRemote"].includes(this.qsgo.currentAction)) return //added 20180608
+
                 if (this.state.generatingMoves) {
                     this.stopGeneratingMoves()
+                    this.setBusy(false) //
+                //added by xiarx//第一次按esc暂停，第二次按恢复
+                } else if (this.state.generatingMoves!=true) {
+                    this.startGeneratingMoves()
+                    this.setBusy(true) //
+                /////////////////////////////////
                 } else if (this.state.openDrawer != null) {
                     this.closeDrawer()
                 } else if (this.state.mode !== 'play') {
@@ -243,6 +294,11 @@ class App extends Component {
         })
 
         this.newFile()
+
+        //xiarx  
+        this.socketServerListen()
+        ////////////////////////////////////
+
     }
 
     componentDidUpdate(_, prevState = {}) {
@@ -302,6 +358,625 @@ class App extends Component {
         }
     }
 
+    //socketServer方式
+    socketServerListen(){            
+            //debugger
+            let me = this
+            let socktServer = net.createServer(function(socket){
+            // 我们获得一个连接 - 该连接自动关联一个socket对象
+            console.log('connect: ' + socket.remoteAddress + ':' + socket.remotePort);
+            socket.setEncoding('binary');
+            //超时事件
+            //  socket.setTimeout(timeout,function(){
+            //    console.log('连接超时');
+            //    socket.end();
+            //  });
+           
+           socket.write('Connected to sabakiQsGo!')
+          
+          //接收到数据
+          socket.on('data',function(data){
+            //debugger 
+            console.log('recv:' + data);            
+            me.parseCommands(data) //解析处理命令
+         
+          });
+          //数据错误事件
+          socket.on('error',function(exception){
+            console.log('socket error:' + exception);
+            socket.end();
+          });
+          //客户端关闭事件
+          socket.on('close',function(data){
+            console.log('close: ' +
+              socket.remoteAddress + ' ' + socket.remotePort);
+          });
+        }).listen(SocketListenPort);
+
+        //服务器监听事件
+        socktServer.on('listening',function(){
+          console.log("socktServer listening:" + socktServer.address().port);
+        });
+        //服务器错误事件
+        socktServer.on("error",function(exception){
+          console.log("socktServer error:" + exception);
+        });
+            
+    }
+
+    parseCommands(commandStr){
+    	//debugger
+
+        let commandObj = JSON.parse(commandStr)
+        if(commandObj.COMMAD=="NEWGAME"){          
+            //{"COMMAD":"NEWGAME","PB":"NULL","PW":"LEELA","HA":3}  
+            this.newGameByRemote(commandObj)
+        }else if(commandObj.COMMAD=="LOADGAME"){
+        	//{"COMMAD":"LOADGAME","PATH":"C:\\\\QSGO\\\\QSSABAKI\\\\SGFFILES\\\\1.SGF"}
+        	this.LoadGameByRemote(commandObj)
+        }else if(commandObj.COMMAD=="EXERCISE"){
+        	//{"COMMAD":"EXERCISE","PATH":"C:\\\\QsGo\\\\QsSabaki\\\\sgffiles\\\\0001.sgf"}
+        	this.ExerciseByRemote(commandObj)
+        }
+
+    }
+
+    //远程下棋
+    async newGameByRemote(commandObj){
+    
+        //evt.preventDefault() 
+
+        if (!this.askForSave()) return
+        //if (showInfo && this.state.openDrawer === 'info') this.closeDrawer()
+        this.setMode('play')
+
+        this.clearUndoPoint()
+        this.detachEngines()
+        this.clearConsole()
+
+        this.state.showCommentBox = false//added by xiarx 下棋时关掉注解页面
+        this.state.showGameGraph = false//added by xiarx 下棋时关掉树页面
+        this.qsgo.gameOverFlag = false//added by xiarx 复盘时允许鼠标点击
+        this.qsgo.currentAction = 'newGameRemote' 
+        
+        await this.waitForRender()     
+        
+        //{"COMMAD":"NEWGAME","PB":"NULL","PW":"LEELA","HA":3,"KM":7.5}  
+        this.state.gameInfo.handicap = commandObj.HA
+        if(commandObj.HA > 0) {
+            this.state.currentPlayer = -1 //有让子的话，白先走   
+        }else{
+            this.state.currentPlayer = 1 //没有让子的话，黑先走   
+        }
+        this.state.gameInfo.komi = commandObj.KM
+        
+        //处理白方
+        if(commandObj.PW=="NULL"){
+            
+        }else{
+            this.state.gameInfo.whiteName = commandObj.PW   
+            this.state.gameInfo.playerNames[1] = commandObj.PW 
+        }
+
+        //加载引擎   
+        let engines_list = setting.get('engines.list')       
+        let {engines} = this.state
+        engines.length = 2    
+
+        //黑
+        if (commandObj.PB=="AQ"){
+            engines[0] = engines_list[0]
+            this.state.gameInfo.blackName = engines_list[0].name   
+            this.state.gameInfo.playerNames[0] = engines_list[0].name
+        }else if(commandObj.PB=="GNUGO"){
+            engines[0] = engines_list[1] 
+            this.state.gameInfo.blackName = engines_list[1].name   
+            this.state.gameInfo.playerNames[0] = engines_list[1].name          
+        }else if(commandObj.PB=="LEELA"){
+            engines[0] = engines_list[2]   
+            this.state.gameInfo.blackName = engines_list[2].name   
+            this.state.gameInfo.playerNames[0] = engines_list[2].name                
+        }else if(commandObj.PB=="PHOENIXGO"){
+            engines[0] = engines_list[3]   
+            this.state.gameInfo.blackName = engines_list[3].name   
+            this.state.gameInfo.playerNames[0] = engines_list[3].name 
+        }else if (commandObj.PB=="QSBOARD"){
+            engines[0] = engines_list[4]
+            this.state.gameInfo.blackName = engines_list[4].name   
+            this.state.gameInfo.playerNames[0] = engines_list[4].name 
+        }else{
+            engines[0] = null
+            this.state.gameInfo.blackName = null   
+            this.state.gameInfo.playerNames[0] = null 
+        }
+      
+        //白        
+        if (commandObj.PW=="AQ"){
+            engines[1] = engines_list[0]
+            this.state.gameInfo.whiteName = engines_list[0].name   
+            this.state.gameInfo.playerNames[1] = engines_list[0].name  
+        }else if(commandObj.PW=="GNUGO"){
+            engines[1] = engines_list[1]     
+            this.state.gameInfo.whiteName = engines_list[1].name   
+            this.state.gameInfo.playerNames[1] = engines_list[1].name        
+        }else if(commandObj.PW=="LEELA"){
+            engines[1] = engines_list[2]   
+            this.state.gameInfo.whiteName = engines_list[2].name   
+            this.state.gameInfo.playerNames[1] = engines_list[2].name                 
+        }else if(commandObj.PW=="PHOENIXGO"){
+            engines[1] = engines_list[3]    
+            this.state.gameInfo.whiteName = engines_list[3].name   
+            this.state.gameInfo.playerNames[1] = engines_list[3].name         
+        }else if (commandObj.PW=="QSBOARD"){
+            engines[1] = engines_list[4]
+            this.state.gameInfo.whiteName = engines_list[4].name   
+            this.state.gameInfo.playerNames[1] = engines_list[4].name 
+        }else{
+            engines[1] = null
+            this.state.gameInfo.whiteName = null   
+            this.state.gameInfo.playerNames[1] = null 
+        }    
+
+        let emptyTree = this.getEmptyGameTree()
+        if(commandObj.HA>0){
+            emptyTree.nodes[0].HA = commandObj.HA    
+        }else{
+            if(emptyTree.nodes[0].HA) delete emptyTree.nodes[0].HA //删除属性
+        }        
+
+        this.setState({
+            openDrawer:  null,
+            gameTrees: [emptyTree],
+            rootTree:[emptyTree],//added by xiarx
+            representedFilename: null
+        })
+
+        this.setCurrentTreePosition(emptyTree, 0)
+
+        this.treeHash = this.generateTreeHash()
+        this.fileHash = this.generateFileHash()
+
+        sound.playNewGame()
+        
+        let keys = ['blackName', 'blackRank', 'whiteName', 'whiteRank',
+            'gameName', 'eventName', 'date', 'result', 'komi']
+
+        let data = keys.reduce((acc, key) => {
+            acc[key] = Array.isArray(this.state[key])
+                && this.state[key].every(x => x == null) ? null : this.state[key]
+            return acc
+        }, {})
+
+        data.handicap = this.state.gameInfo.handicap
+        data.size = this.state.gameInfo.size        
+
+        sabaki.setGameInfo(emptyTree, data)
+       
+        sabaki.attachEngines(...engines)
+        await sabaki.waitForRender()        
+
+        let i = this.state.currentPlayer > 0 ? 0 : 1
+        let startGame = setting.get('gtp.start_game_after_attach')
+
+        if (startGame && sabaki.attachedEngineControllers[i] != null) {
+            sabaki.startGeneratingMoves()
+        }
+
+    }    
+
+    //远程复盘
+    async LoadGameByRemote(commandObj)
+    {
+    	
+        if (!this.askForSave()) return        
+
+        let filename = commandObj.PATH
+        if (!filename) {
+            dialog.showOpenDialog({
+                properties: ['openFile'],
+                filters: [...fileformats.meta, {name: 'All Files', extensions: ['*']}]
+            }, ({result}) => { 
+                if (result) commandObj.PATH = result[0]     
+                if (commandObj.PATH) {
+                    this.LoadGameByRemote(commandObj)                        
+                }
+            })
+
+            return
+        }
+              
+        this.state.showCommentBox = true//added by xiarx 复盘时自动打开注解页面
+        this.state.showGameGraph = true//added by xiarx 复盘时自动打开树页面
+        this.qsgo.gameOverFlag = false//added by xiarx 复盘时允许鼠标点击
+        this.qsgo.currentAction = 'loadGameRemote' //added by xiarx 当前执行菜单 主要用于让子棋的  
+
+        let {extname} = require('path')
+        let extension = extname(filename).slice(1)
+        let content = fs.readFileSync(filename, {encoding: 'binary'})
+
+        let success = await this.loadContent(content, extension, {suppressAskForSave: true})
+
+        if (success) {
+            this.setState({representedFilename: filename})
+            this.fileHash = this.generateFileHash()
+
+            if (setting.get('game.goto_end_after_loading')) {
+                this.goToEnd()
+            }
+
+            //debugger
+            //复盘时，黑方作为引擎，但是双方棋手名称都显示为棋思智能棋盘
+            //console.log('原黑方棋手：' + this.state.gameInfo.playerNames[0])
+            //let oriBlackPlayer = this.state.gameInfo.playerNames[0]
+            let oriWhitePlayer = this.state.gameInfo.playerNames[1]
+            // 驱动智能棋盘gtp引擎 xiarx 20180522     
+            await this.attachQsGtp()
+
+            //改掉白方名称
+            //this.state.gameInfo.playerNames[0] = oriBlackPlayer
+            this.state.gameInfo.playerNames[1] = oriWhitePlayer
+            //初始化当前步数
+            this.qsgo.currentStep = 0
+
+			//根据让子信息，想gtp引擎发送play命令
+			let response = await this.playHandicapStep()
+			if(!response) return
+
+			//自动播放 xiarx 20180524	        
+            setTimeout(() => {
+                this.playNextStep()
+            }, setting.get('gtp.move_delay'))               
+        }
+    }
+
+    //远程死活题练习
+    async ExerciseByRemote(commandObj)
+    {
+    	//debugger 
+        if (!this.askForSave()) return        
+
+        let filename = commandObj.PATH
+        if (!filename) {
+            dialog.showOpenDialog({
+                properties: ['openFile'],
+                filters: [...fileformats.meta, {name: 'All Files', extensions: ['*']}]
+            }, ({result}) => {          
+                if (result) commandObj.PATH = result[0]       
+                if (commandObj.PATH) {
+                    this.ExerciseByRemote(commandObj)                        
+                }
+            })
+            return
+        } 
+             
+        this.state.showCommentBox = true//added by xiarx 练习自动打开注解页面
+        this.state.showGameGraph = true//added by xiarx 练习时自动打开树页面
+        this.qsgo.gameOverFlag = false//added by xiarx 复盘时允许鼠标点击      
+        this.qsgo.currentAction = 'exerciseRemote' //added by xiarx 当前执行菜单 主要用于让子棋的  
+
+        let {extname} = require('path')
+        let extension = extname(filename).slice(1)
+        let content = fs.readFileSync(filename, {encoding: 'binary'})
+
+        this.qsgo.currentFile = filename
+
+        let success = await this.loadContent(content, extension, {suppressAskForSave: true})
+
+        if (success) {
+            this.setState({representedFilename: filename})
+            this.fileHash = this.generateFileHash()
+
+            if (setting.get('game.goto_end_after_loading')) {
+                this.goToEnd()
+            }            
+
+            // 驱动智能棋盘gtp引擎 xiarx 20180522     
+            await this.attachQsGtp()             
+
+			//死活题初始化子
+			let response = await this.playAncientStep()
+			if(!response) return
+
+			////////////////////////////////////////
+			let exTree = this.state.treePosition[0]		
+			let nodesLength = exTree.nodes.length 
+			let subtreesLength = exTree.subtrees.length //总分支数
+
+			//默认选择最左边的分支 这里需要更加通用一点
+			if(nodesLength > 1){				
+				//如果根节点之后还有其它节点,预留，目前还没有遇到
+				//.............
+				this.qsgo.currentStep = 0				
+				
+				//this.setCurrentTreePosition(exTree,this.state.currentStep)				
+				//await this.waitForRender()	
+				this.qsgo.currentTree  = 	exTree		
+				this.qsgo.currentBrotherTrees =	null	
+
+			}else if(nodesLength==1){
+				if(subtreesLength > 1){
+					this.qsgo.currentStep = 0					
+					this.qsgo.currentTree  = 	exTree.subtrees[0]	
+					this.qsgo.currentBrotherTrees =	exTree.subtrees	
+					//默认哪个分支需要根据gtp引擎回复情况确定		
+				}else{
+					//只有初始节点，后续节点，无子树
+					return //结束？
+				}				
+			}else{
+				return //错误情况？？？
+			}	
+		
+			//开始做题         			
+			//用下一步的B W来判断黑白
+			if(this.qsgo.currentTree.nodes[0].B){				
+				this.qsgo.guessPlayer = 'B'
+				//this.state.currentPlayer = 1
+			}else if(this.qsgo.currentTree.nodes[0].W){				
+				this.qsgo.guessPlayer = 'W'
+				//this.state.currentPlayer = -1
+			}else{
+				return //错误文件
+			}
+
+            setTimeout(() => {
+                this.playExerciseStep()
+            }, setting.get('gtp.move_delay'))
+            
+        }
+    }
+
+    //Added by xiarx
+    //黑方加载棋思智能棋盘gtp引擎,
+    //本函数只用于远程复盘和远程练习题
+    async attachQsGtp(){
+    	let engines_list = setting.get('engines.list')       
+        let {engines} = this.state
+        engines.length = 1    
+        engines[0] = engines_list[4]       
+        sabaki.attachEngines(...engines)
+    }    
+
+	//更准确，更通用
+	getColorByNode(node){
+		let colors = ['B','W']
+		let colorValues = [1,-1]
+		
+		let colorObj = {}		 		
+		if(node.B){
+			colorObj.color = colors[0]
+			colorObj.value = colorValues[0]
+		}else if(node.W){
+			colorObj.color = colors[1]
+			colorObj.value = colorValues[1]		
+		}		
+		return colorObj
+	}
+
+	getVertexByCoord(stone){
+		let alphaG = 'ABCDEFGHJKLMNOPQRSTUVWXYZ'
+		let Vertex = alphaG[stone[0]] + (19 - stone[1])
+		return Vertex
+	}
+
+	getVertexByAlphaCoord(AlphaCoord){
+		//将字母坐标转换成gtp坐标Vertex 
+    	//在sgf文件中可以有 i ,在gtp命令中，不能有 i 
+    	//gtp x轴 A ~ T(无i) y轴 1-19 第一象限 原点在左下
+    	//aa => a19  as => a1     	
+    	let alphaS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'     	
+    	let alphaG = 'ABCDEFGHJKLMNOPQRSTUVWXYZ'
+    	
+    	let alphaTemp = alphaG[alphaS.indexOf(AlphaCoord[1].toUpperCase())]
+    	let currentVertex = alphaG[alphaS.indexOf(AlphaCoord[0].toUpperCase())]+(19 - alphaG.indexOf(alphaTemp))
+    	return currentVertex
+	}
+
+	//从一颗树上根据步数活动gtp坐标
+	getVertexByStep(currentTree,currentStep){
+		let currentCoord = ''   
+		if(currentTree.nodes[currentStep].B){
+			currentCoord = currentTree.nodes[currentStep].B[0]
+		}else if(currentTree.nodes[currentStep].W){
+			currentCoord = currentTree.nodes[currentStep].W[0] 
+		}
+
+    	let currentVertex = this.getVertexByAlphaCoord(currentCoord)
+    	return currentVertex
+	}		
+
+	//发送gtp命令,目前只支持play guess，而且只用于远程复盘和远程死活题
+    async sendGtpCommand(actionStr,colorObj,currentVertex){
+    	if(!['B', 'W'].includes(colorObj.color)) return false
+    	let controller = this.attachedEngineControllers[0] //colorObj.value > 0 ? this.attachedEngineControllers[0] :  this.attachedEngineControllers[1]
+    	let response = await controller.sendCommand(new Command(null, actionStr, colorObj.color, currentVertex))
+    	return response
+    }
+
+    //向gtp引擎发送摆放让子的命令
+    async playHandicapStep(){
+    	let HA = this.state.gameInfo.handicap
+    	//取让子位置
+    	let gametree  = this.modules.gametree
+    	let root = this.modules.gametree.getRoot(this.state.treePosition[0])
+    	let board = gametree.getBoard(root, 0)
+        let stones = board.getHandicapPlacement(+HA) 	// [3,4]
+        //向gtp 发送让子 
+        for(let i=0;i<stones.length;i++){
+        	let vertex = this.getVertexByCoord(stones[i])
+        	let controller = this.attachedEngineControllers[0]
+        	let response = await controller.sendCommand(new Command(null, 'play', 'B', vertex))
+        	if (response.error) {
+    			return false	    	    		
+    		}    	    		
+        }
+        return true	
+	}
+
+	//向gtp引擎发送下一步棋的命令
+	async playNextStep(){
+		this.qsgo.currentStep ++		
+		//需要检测是否到了最后一步
+		if(this.qsgo.currentStep >= this.state.treePosition[0].nodes.length ) {
+			console.log('复盘结束，共' + ' ' + this.qsgo.currentStep + ' 手。')
+			//done XXX 			
+			let controller = this.attachedEngineControllers[0]
+			await controller.sendCommand(new Command(null, 'done', 'XXX'))//后续需取出对局结果			
+			//this.state.currentStep = 0			
+			return	
+		}
+
+		//在棋盘上显示当前步数
+		this.setCurrentTreePosition(this.state.treePosition[0],this.qsgo.currentStep)
+		await this.waitForRender()
+		
+		//给gtp引擎发命令		
+		let colorObj = this.getColorByNode(this.state.gameTrees[0].nodes[this.qsgo.currentStep]) //直接从树上取黑白，不用通过步数计算
+
+		let currentVertex = this.getVertexByStep(this.state.gameTrees[0],this.qsgo.currentStep)		
+    	let response = await this.sendGtpCommand('play',colorObj,currentVertex)  
+
+    	if(!response.error){
+    		setTimeout(() => {
+                this.playNextStep()
+            }, setting.get('gtp.move_delay'))
+    	}
+	}
+
+	//远程死活题中的题干棋子
+	async playAncientStep(){
+    	//取死活题的初始棋子位置
+    	let gametree  = this.state.treePosition[0]
+    	
+    	if(gametree.nodes[0].AB){
+    		//向gtp 发送黑子 
+	        for(let i=0;i<gametree.nodes[0].AB.length;i++){
+	        	let vertexB = this.getVertexByAlphaCoord(gametree.nodes[0].AB[i])
+	        	let controller = this.attachedEngineControllers[0]
+	        	let response = await controller.sendCommand(new Command(null, 'play', 'B', vertexB))
+	        	if (response.error) {
+	    			return false	    	    		
+	    		}    	    		
+	        }	
+    	}
+        if(gametree.nodes[0].AW){
+	        //向gtp 发送白子 
+	        for(let j=0;j<gametree.nodes[0].AW.length;j++){
+	        	let vertexW = this.getVertexByAlphaCoord(gametree.nodes[0].AW[j])
+	        	let controller = this.attachedEngineControllers[0]
+	        	let response = await controller.sendCommand(new Command(null, 'play', 'W', vertexW))
+	        	if (response.error) {
+	    			return false	    	    		
+	    		}    	    		
+	        }
+	    }
+
+        return true	
+	}
+
+	
+	//处理死活题中的每一步
+	async playExerciseStep(){	
+		
+		if(this.qsgo.currentStep==0){
+			//如果处在分支的第一手，需要取出兄弟分支的各个位置，作为guess参数的			
+			if(this.qsgo.currentBrotherTrees.length > 1){				
+				this.qsgo.currentVertexOptions = ''
+				for(let i=0;i<this.qsgo.currentBrotherTrees.length;i++){										
+					let colorObj = this.getColorByNode(this.qsgo.currentBrotherTrees[0].nodes[0]) //直接从树上取黑白，不用通过步数计算
+					let coordOption = colorObj.value > 0 ? this.qsgo.currentBrotherTrees[i].nodes[0].B[0] : this.qsgo.currentBrotherTrees[i].nodes[0].W[0]
+					//转换格式 sgf -> gtp
+					let vertexOption = this.getVertexByAlphaCoord(coordOption)
+
+					if(i>0)  this.qsgo.currentVertexOptions += ','
+					this.qsgo.currentVertexOptions += vertexOption
+				}					
+			}			
+		}
+	
+		this.qsgo.currentStep ++	
+		if (this.qsgo.currentStep > this.qsgo.currentTree.nodes.length){			
+			if(this.qsgo.currentTree.subtrees.length > 0){
+				//本分支走完，有子树，切换到第一个分支				
+				this.qsgo.currentBrotherTrees = this.qsgo.currentTree.subtrees 
+				this.qsgo.currentTree = this.qsgo.currentTree.subtrees[0] //切记！！！当前树降级，必须同时修改兄弟树组，而且要先改兄弟树组，再改当前树！！！
+				this.qsgo.currentStep = 0
+
+				setTimeout(() => {
+	                this.playExerciseStep()
+	            }, setting.get('gtp.move_delay'))		
+
+	            return //切换分支后必须跳出，后面语句不能继续执行
+
+			}else{
+				//debugger
+				//答题结束		
+				console.log('答题结束。（ ' + this.qsgo.currentExercise + ' ）')
+				//done X XXXX 
+				//其中第一个参数X为 “R” 时表示答对，为 “E”表示答错。可能不靠谱
+				//第二个参数 XXXX 表示结果提示信息，比如“白无法做活，恭喜答对”等，暂时可以不用。
+				let controller = this.attachedEngineControllers[0]
+
+				let commentStr = ''
+				if(this.qsgo.currentTree.nodes[this.qsgo.currentTree.nodes.length  -1].C){
+					commentStr = this.qsgo.currentTree.nodes[this.qsgo.currentTree.nodes.length  -1].C[0]
+				} 
+				await controller.sendCommand(new Command(null, 'done', this.qsgo.exerciseResult , commentStr))
+
+				this.qsgo.currentExercise = ''				
+				this.qsgo.currentStep = 0				
+				this.qsgo.currentTree = null
+				this.qsgo.currentBrotherTrees = null
+				this.qsgo.exerciseResult = 'R'
+			}
+		}else{
+			//继续本分支	//注意第一手是[0]			
+			//取黑白						
+			let colorObj = this.getColorByNode(this.qsgo.currentTree.nodes[this.qsgo.currentStep -1]) 			
+			let currentAct = (colorObj.color == this.qsgo.guessPlayer) ? 'guess' : 'play'
+			let currentVertex = this.getVertexByStep(this.qsgo.currentTree,this.qsgo.currentStep -1)		
+
+			//对于存在多分支的情况，guess命令发送 树的分支必须处在第一个节点上，树中间不能有分支
+			if(currentAct=='guess' && this.qsgo.currentVertexOptions!=''){
+				currentVertex = this.qsgo.currentVertexOptions
+			}
+			
+			//给gtp引擎发命令	
+    		let response = await this.sendGtpCommand(currentAct,colorObj,currentVertex)  
+    		if(!response.error){
+    			//同步棋盘显示 
+				//this.setCurrentTreePosition(this.state.currentTree,this.state.currentStep) //当前步数会跳，不知为何？？？
+				//await this.waitForRender()	
+				
+				//获取qsboard返回的坐标，切换到该分支				
+				if(this.qsgo.currentVertexOptions != ''){
+					//"E19,W17,C18,D18".indexOf("D18") 
+					//"E9,W7,C8,D18"  注意这种情况，有三位数和四位数之分	
+					let vertexArray = this.qsgo.currentVertexOptions.split(",") 
+					let index = vertexArray.indexOf(response.content)
+					
+					this.qsgo.currentTree = this.qsgo.currentBrotherTrees[index]//切记！！！当前树切换为兄弟树，父亲树无需改变
+					if(index > 0){
+						this.qsgo.exerciseResult = 'E' 
+					}else{
+						this.qsgo.exerciseResult = 'R' //除了0分支，其它都认为是错误答案
+					}				
+					this.qsgo.currentVertexOptions = ''
+				}				
+				
+	    		setTimeout(() => {
+	                this.playExerciseStep()
+	            }, setting.get('gtp.move_delay'))
+    		}
+		}
+	}
+
+	
+
+    /////////////////////////////////////////////
+
+   
+
     updateSettingState(key = null) {
         let data = {
             'app.zoom_factor': 'zoomFactor',
@@ -321,7 +996,7 @@ class App extends Component {
         if (key == null) {
             for (let k in data) this.updateSettingState(k)
             return
-        }
+        }        
 
         if (key in data) {
             ipcRenderer.send('build-menu', this.state.busy > 0)
@@ -399,7 +1074,7 @@ class App extends Component {
     // File Management
 
     getEmptyGameTree() {
-        let handicap = setting.get('game.default_handicap')
+        let handicap = 0 //setting.get('game.default_handicap') //不要每次都取上次的让子,否则远程通讯开局时会沿用上一局的让子
         let size = setting.get('game.default_board_size').toString().split(':').map(x => +x)
         let [width, height] = [size[0], size.slice(-1)[0]]
         let handicapStones = new Board(width, height).getHandicapPlacement(handicap).map(sgf.vertex2point)
@@ -418,6 +1093,7 @@ class App extends Component {
     }
 
     async newFile({playSound = false, showInfo = false, suppressAskForSave = false} = {}) {
+     
         if (!suppressAskForSave && !this.askForSave()) return
 
         if (showInfo && this.state.openDrawer === 'info') this.closeDrawer()
@@ -426,6 +1102,11 @@ class App extends Component {
         this.clearUndoPoint()
         this.detachEngines()
         this.clearConsole()
+
+        this.state.showCommentBox = false//added by xiarx 下棋时关掉注解页面
+        this.state.showGameGraph = false//added by xiarx 下棋时关掉树页面
+        this.qsgo.gameOverFlag = false //added by xiarx 棋局终了标志
+        this.qsgo.currentAction = 'NewFile' //added by xiarx 当前执行菜单
 
         await this.waitForRender()
 
@@ -446,6 +1127,10 @@ class App extends Component {
     }
 
     async loadFile(filename = null, {suppressAskForSave = false} = {}) {
+    	
+    	//debugger //增加复盘功能时，对棋思智能棋盘gtp server 的驱动
+    	this.qsgo.currentAction = 'loadFile' //added by xiarx 当前执行菜单 主要用于让子棋的
+
         if (!suppressAskForSave && !this.askForSave()) return
 
         if (!filename) {
@@ -454,7 +1139,15 @@ class App extends Component {
                 filters: [...fileformats.meta, {name: 'All Files', extensions: ['*']}]
             }, ({result}) => {
                 if (result) filename = result[0]
-                if (filename) this.loadFile(filename, {suppressAskForSave: true})
+                //if (filename) this.loadFile(filename, {suppressAskForSave: true})
+                if (filename) {
+                    this.loadFile(filename, {suppressAskForSave: true})        
+                    ///////////////////////////////////////////            
+                    this.state.showCommentBox = true//added by xiarx 复盘时自动打开注解页面
+                    this.state.showGameGraph = true//added by xiarx 复盘自动打开树页面
+                    this.qsgo.gameOverFlag = false//added by xiarx 复盘时允许鼠标点击
+                    ///////////////////////////////////////////
+                }
             })
 
             return
@@ -473,10 +1166,12 @@ class App extends Component {
             if (setting.get('game.goto_end_after_loading')) {
                 this.goToEnd()
             }
+           
         }
-    }
+    }    
 
     async loadContent(content, extension, {suppressAskForSave = false, ignoreEncoding = false} = {}) {
+
         if (!suppressAskForSave && !this.askForSave()) return
 
         this.setBusy(true)
@@ -500,7 +1195,7 @@ class App extends Component {
 
             if (gameTrees.length == 0) throw true
         } catch (err) {
-            dialog.showMessageBox('This file is unreadable.', 'warning')
+            dialog.showMessageBox('亲，该文件可能不是一个合法的存盘文件，请检查一下哦！', 'warning')
             success = false
         }
 
@@ -514,6 +1209,7 @@ class App extends Component {
 
             this.setCurrentTreePosition(gameTrees[0], 0)
 
+            await sabaki.waitForRender()//added by xiarx 
             this.treeHash = this.generateTreeHash()
             this.fileHash = this.generateFileHash()
         }
@@ -533,6 +1229,7 @@ class App extends Component {
     }
 
     saveFile(filename = null) {
+    	
         if (!filename) {
             let cancel = false
 
@@ -592,9 +1289,9 @@ class App extends Component {
 
         if (hash !== this.treeHash) {
             let answer = dialog.showMessageBox(
-                'Your changes will be lost if you close this file without saving.',
+                '是否保存当前棋局？',
                 'warning',
-                ['Save', 'Don’t Save', 'Cancel'], 2
+                ['保存', '不保存', '取消'], 2
             )
 
             if (answer === 0) return this.saveFile(this.state.representedFilename)
@@ -628,6 +1325,8 @@ class App extends Component {
     clickVertex(vertex, {button = 0, ctrlKey = false, x = 0, y = 0} = {}) {
         this.closeDrawer()
 
+        if(this.qsgo.gameOverFlag) renturn 
+
         let [tree, index] = this.state.treePosition
         let board = gametree.getBoard(tree, index)
         let node = tree.nodes[index]
@@ -639,7 +1338,18 @@ class App extends Component {
         if (['play', 'autoplay'].includes(this.state.mode)) {
             if (button === 0) {
                 if (board.get(vertex) === 0) {
+
+                	//GTP引擎的回合拒绝接受鼠标点击 xiarx          
+                	let player = this.inferredState.currentPlayer //黑方 1 白方 -1        			
+        			if (player > 0) {       
+                        if(this.attachedEngineControllers[0]) return 
+        			}else{        
+                        if(this.attachedEngineControllers[1]) return 
+        			}
+        			///////////////////////////////////////////
+
                     this.makeMove(vertex, {sendToEngine: true})
+
                 } else if (vertex in board.markups
                 && board.markups[vertex][0] === 'point'
                 && setting.get('edit.click_currentvertex_to_remove')) {
@@ -653,7 +1363,6 @@ class App extends Component {
         } else if (this.state.mode === 'edit') {
             if (ctrlKey) {
                 // Add coordinates to comment
-
                 let coord = board.vertex2coord(vertex)
                 let commentText = node.C ? node.C[0] : ''
 
@@ -762,7 +1471,8 @@ class App extends Component {
         this.events.emit('vertexClick')
     }
 
-    makeMove(vertex, {player = null, clearUndoPoint = true, sendToEngine = false} = {}) {
+    makeMove(vertex, {player = null, clearUndoPoint = true, sendToEngine = false} = {}) {    	
+
         if (!['play', 'autoplay', 'guess'].includes(this.state.mode)) {
             this.closeDrawer()
             this.setMode('play')
@@ -792,12 +1502,24 @@ class App extends Component {
 
                 ko = prev[0].nodes[prev[1]].board.getPositionHash() == hash
 
+                //打劫的情况 xiarx
+                if (ko) {
+                	dialog.showMessageBox(
+	                    ['对不起，您不能在没有寻劫的情况下直接提劫，',
+	                    '请在别处落子！'].join('\n'),
+	                    'info',
+	                    ['返回'], 0
+                	) 
+                	return
+                } 
+                /*
                 if (ko && dialog.showMessageBox(
                     ['You are about to play a move which repeats a previous board position.',
                     'This is invalid in some rulesets.'].join('\n'),
                     'info',
                     ['Play Anyway', 'Don’t Play'], 1
                 ) != 0) return
+                */
             }
 
             let vertexNeighbors = board.getNeighbors(vertex)
@@ -812,6 +1534,17 @@ class App extends Component {
                 .every(v => board.getLiberties(v).length == 1)
             && vertexNeighbors.filter(v => board.get(v) == 0).length == 0
 
+            //自杀的情况  xiarx
+            if (suicide) {
+            	dialog.showMessageBox(
+                    ['对不起，按照规则您不能没气的地方落子，',
+                    '请在别处落子！'].join('\n'),
+                    'info',
+                    ['返回'], 0
+            	) 
+            	return
+            } 
+            /*
             if (suicide && setting.get('game.show_suicide_warning')) {
                 if (dialog.showMessageBox(
                     ['You are about to play a suicide move.',
@@ -820,6 +1553,7 @@ class App extends Component {
                     ['Play Anyway', 'Don’t Play'], 1
                 ) != 0) return
             }
+            */
 
             // Animate board
 
@@ -947,7 +1681,13 @@ class App extends Component {
         this.makeMove([-1, -1], {player, clearUndoPoint: false})
         this.makeMainVariation(...this.state.treePosition, {setUndoPoint: false})
 
+        //this.setBusy(false)//xiarx added 20180408
+        //此处需要修改，棋局结束后，应该不能再在棋盘上落子
+        this.qsgo.gameOverFlag = true
+        /////////////////////////////////////////
+
         this.events.emit('resign', {player})
+        
     }
 
     useTool(tool, vertex, argument = null) {
@@ -1173,7 +1913,7 @@ class App extends Component {
 
     // Navigation
 
-    setCurrentTreePosition(tree, index, {clearUndoPoint = true} = {}) {
+    setCurrentTreePosition(tree, index, {clearUndoPoint = true} = {}) { 
         if (['scoring', 'estimator'].includes(this.state.mode))
             return
 
@@ -1406,7 +2146,7 @@ class App extends Component {
         }
     }
 
-    setGameInfo(tree, data) {
+    setGameInfo(tree, data) {     
         let root = gametree.getRoot(tree)
         let node = root.nodes[0]
 
@@ -1453,9 +2193,8 @@ class App extends Component {
                 } else if (key === 'handicap') {
                     let board = gametree.getBoard(root, 0)
                     let stones = board.getHandicapPlacement(+value)
-
                     value = stones.length
-                    setting.set('game.default_handicap', value)
+                    setting.set('game.default_handicap', value)                        
 
                     if (value <= 1) {
                         delete node[props[key]]
@@ -1922,6 +2661,7 @@ class App extends Component {
             if (this.attachedEngineControllers[i]) this.attachedEngineControllers[i].stop()
 
             try {
+               
                 let controller = engines[i] ? new gtp.Controller(engines[i]) : null
                 controller.on('command-sent', this.handleCommandSent.bind(this))
 
@@ -1932,10 +2672,17 @@ class App extends Component {
                 controller.sendCommand(command('name'))
                 controller.sendCommand(command('version'))
                 controller.sendCommand(command('protocol_version'))
-                controller.sendCommand(command('list_commands')).then(response => {
+                //xiarx
+                controller.sendCommand(command('list_commands'))
+                controller.sendCommand(command('clear_board')).then(response => {  
                     engineCommands[i] = response.content.split('\n')
                 })
 
+                /*
+                controller.sendCommand(command('list_commands')).then(response => {
+                    engineCommands[i] = response.content.split('\n')
+                })
+                */
                 controller.on('stderr', ({content}) => {
                     this.setState(({consoleLog}) => ({
                         consoleLog: [...consoleLog, {
@@ -1986,7 +2733,7 @@ class App extends Component {
         let response = await getResponse()
         let sabakiJsonMatch = response.content.match(/^#sabaki(.*)$/m) || ['', '{}']
 
-        response.content = response.content.replace(/^#sabaki(.*)$/gm, '#sabaki{…}')
+        response.content = response.content.replace(/^#sabaki(.*)$/gm, '#sabaki{…}')     
 
         this.setState(({consoleLog}) => {
             let index = consoleLog.indexOf(entry)
@@ -2076,7 +2823,8 @@ class App extends Component {
     }
 
     async startGeneratingMoves({passPlayer = null, followUp = false} = {}) {
-        this.closeDrawer()
+
+    	this.closeDrawer()
 
         if (followUp && !this.state.generatingMoves) {
             this.hideInfoOverlay()
@@ -2087,6 +2835,7 @@ class App extends Component {
         }
 
         await this.syncEngines({passPlayer})
+     
 
         let {currentPlayer, rootTree} = this.inferredState
         let [color, opponent] = currentPlayer > 0 ? ['B', 'W'] : ['W', 'B']
@@ -2097,8 +2846,7 @@ class App extends Component {
         if (playerController == null) {
             if (otherController != null) {
                 // Switch engines, so the attached engine can play
-
-                let engines = [...this.state.attachedEngines].reverse()
+                let engines = [...this.state.attachedEngines].reverse() //交换黑白就是这里
                 this.attachEngines(...engines)
                 ;[playerController, otherController] = [otherController, playerController]
             } else {
@@ -2107,12 +2855,12 @@ class App extends Component {
         }
 
         if (!followUp && otherController != null) {
-            this.flashInfoOverlay('Press Esc to stop generating moves')
+            this.flashInfoOverlay('进入人工智能自动下棋模式，按 Esc 键可暂停......')
         }
 
-        this.setBusy(true)
+        //this.setBusy(true)//去掉免得两个人工智能下棋时，菜单永远恢复不了
 
-        let response = await playerController.sendCommand(new gtp.Command(null, 'genmove', color))
+        let response = await playerController.sendCommand(new gtp.Command(null, 'genmove', color))//这句执行后菜单就变灰了
         let sign = color === 'B' ? 1 : -1
         let pass = true
         let vertex = [-1, -1]
@@ -2124,9 +2872,12 @@ class App extends Component {
         }
 
         if (response.content.toLowerCase() === 'resign') {
-            dialog.showMessageBox(`${playerController.engine.name} has resigned.`)
+            dialog.showMessageBox(`${playerController.engine.name} 已认输！`)
 
             this.stopGeneratingMoves()
+
+            this.setBusy(false)//xiarx added 20180408
+
             this.hideInfoOverlay()
             this.makeResign()
 
@@ -2162,7 +2913,7 @@ class App extends Component {
     }
 
     stopGeneratingMoves() {
-        this.showInfoOverlay('Please wait…')
+        this.showInfoOverlay('人工智能自动下棋模式已暂停，再次按 Esc 键可继续…')
         this.setState({generatingMoves: false})
     }
 
