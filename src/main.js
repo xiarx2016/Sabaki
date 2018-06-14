@@ -3,6 +3,11 @@ const fs = require('fs')
 const {join} = require('path')
 const setting = require('./setting')
 const updater = require('./updater')
+//xiarx
+const net = require('net');
+const PIPE_NAME = "qsGotestpipe";
+const PIPE_PATH = "\\\\.\\pipe\\" + PIPE_NAME;
+/////////////////////////////////////
 
 let windows = []
 let openfile = null
@@ -40,7 +45,8 @@ function newWindow(path) {
     })
 
     window.loadURL(`file://${__dirname}/../index.html`)
-
+    
+    //window.openDevTools()//test
     if (setting.get('debug.dev_tools')) {
         window.openDevTools()
     }
@@ -165,6 +171,7 @@ app.on('ready', () => {
     if (setting.get('app.startup_check_updates')) {
         setTimeout(() => checkForUpdates(), setting.get('app.startup_check_updates_delay'))
     }
+
 })
 
 app.on('activate', (evt, hasVisibleWindows) => {

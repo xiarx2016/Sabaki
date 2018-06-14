@@ -59,11 +59,37 @@ let defaults = {
     'edit.show_removenode_warning': true,
     'edit.show_removeothervariations_warning': true,
     'edit.undo_delay': 100,
-    'engines.list': [],
+    'engines.list': [  
+        {
+          "name": "AQ",
+          "path": "AQ\\AQ.exe",
+          "args": ""
+        },
+        {
+          "name": "GnuGo",
+          "path": "gnugo-3.8\\gnugo.exe",
+          "args": "--mode gtp"
+        },
+        {
+          "name": "leela",
+          "path": "leela0110\\Leela0110GTP_OpenCL.exe",
+          "args": "--gtp"
+        },
+        {
+          "name": "phoenixGo",
+          "path": "phoenixGo\\start.bat",
+          "args": ""
+        },
+        {
+          "name": "棋思智能棋盘",
+          "path": "qsGtp\\qsgtp.exe",
+          "args": ""
+        }
+    ],
     'file.show_reload_warning': true,
     'find.delay': 100,
     'game.default_board_size': 19,
-    'game.default_komi': 6.5,
+    'game.default_komi': 7.5,//
     'game.default_handicap': 0,
     'game.goto_end_after_loading': false,
     'game.navigation_sensitivity': 40,
@@ -107,9 +133,9 @@ let defaults = {
     'view.properties_height': 50,
     'view.properties_minheight': 20,
     'view.animated_stone_placement': true,
-    'view.fuzzy_stone_placement': true,
+    'view.fuzzy_stone_placement': false,//
     'view.show_menubar': true,
-    'view.show_leftsidebar': false,
+    'view.show_leftsidebar': false,//
     'view.show_comments': false,
     'view.show_coordinates': false,
     'view.show_graph': false,
