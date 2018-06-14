@@ -376,7 +376,8 @@ class EngineItem extends Component {
     constructor() {
         super()
 
-        this.handleChange = evt => {
+        this.handleChange = evt => {            
+            
             let {onChange = helper.noop} = this.props
             let element = evt.currentTarget
             let data = Object.assign({}, this.props, {
@@ -521,7 +522,7 @@ class EnginesTab extends Component {
             ),
 
             h('p', {},
-                h('button', {type: 'button', onClick: this.handleAddButtonClick}, 'Add')
+                h('button', {type: 'button', onClick: this.handleAddButtonClick}, '增加')
             )
         )
     }
@@ -575,28 +576,30 @@ class PreferencesDrawer extends Component {
             },
 
             h('ul', {class: 'tabs'},
+                /*
                 h('li', {
                         class: classNames({general: true, current: tab === 'general'}),
                         onClick: this.handleTabClick
                     },
 
-                    h('a', {href: '#'}, 'General')
-                ),
+                    h('a', {href: '#'}, '通用')
+                ),                
                 h('li',
                     {
                         class: classNames({themes: true, current: tab === 'themes'}),
                         onClick: this.handleTabClick
                     },
 
-                    h('a', {href: '#'}, 'Themes')
+                    h('a', {href: '#'}, '主题')
                 ),
+                */
                 h('li',
                     {
                         class: classNames({engines: true, current: tab === 'engines'}),
                         onClick: this.handleTabClick
                     },
 
-                    h('a', {href: '#'}, 'Engines')
+                    h('a', {href: '#'}, '人工智能')
                 )
             ),
 
@@ -606,7 +609,7 @@ class PreferencesDrawer extends Component {
                 h(EnginesTab, {engines}),
 
                 h('p', {},
-                    h('button', {type: 'button', onClick: this.handleCloseButtonClick}, 'Close')
+                    h('button', {type: 'button', onClick: this.handleCloseButtonClick}, '关闭')
                 )
             )
         )

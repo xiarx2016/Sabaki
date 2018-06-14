@@ -27,7 +27,8 @@ class InfoDrawer extends Component {
         super()
 
         this.handleSubmitButtonClick = async evt => {
-            evt.preventDefault()
+            debugger
+            evt.preventDefault()   
 
             let [tree, index] = this.props.treePosition
             let emptyTree = !tree.parent && tree.nodes.length === 1 && tree.subtrees.length === 0
@@ -127,6 +128,9 @@ class InfoDrawer extends Component {
             'gameName', 'eventName',
             'komi', 'result', 'handicap'
         ].reduce((acc, key) => {
+            
+            debugger
+
             acc[key] = ({currentTarget}) => {
                 this.setState({[key]: currentTarget.value === '' ? null : currentTarget.value})
             }
@@ -143,7 +147,7 @@ class InfoDrawer extends Component {
 
             let template = [
                 {
-                    label: 'Manual',
+                    label: '人',
                     type: 'checkbox',
                     checked: this.state.engines[index] == null,
                     click: () => {
@@ -164,6 +168,9 @@ class InfoDrawer extends Component {
                     type: 'checkbox',
                     checked: engine === this.state.engines[index],
                     click: () => {
+
+                        debugger //xiarx
+                    
                         let {engines} = this.state
                         engines[index] = engine
 
@@ -175,7 +182,7 @@ class InfoDrawer extends Component {
                 })),
                 engines.length > 0 && {type: 'separator'},
                 {
-                    label: 'Manage Engines…',
+                    label: '配置人工智能…',
                     click: () => {
                         sabaki.setState({preferencesTab: 'engines'})
                         sabaki.openDrawer('preferences')
@@ -339,19 +346,19 @@ class InfoDrawer extends Component {
                             class: classNames({menu: true, active: engines[0] != null}),
                             onClick: this.handleEngineMenuClick[0]
                         }), ' ',
-
+                        /*
                         h('input', {
                             type: 'text',
                             name: 'rank_1',
-                            placeholder: 'Rank',
+                            placeholder: '级别',
                             value: blackRank,
                             onInput: this.handleInputChange.blackRank
                         }),
-
+						*/
                         h('input', {
                             type: 'text',
                             name: 'name_1',
-                            placeholder: 'Black',
+                            placeholder: '黑方选手',
                             value: blackName,
                             onInput: this.handleInputChange.blackName
                         })
@@ -361,7 +368,7 @@ class InfoDrawer extends Component {
                         class: 'current-player',
                         src: `./img/ui/player_${currentPlayer}.svg`,
                         height: 31,
-                        title: 'Swap',
+                        title: '交换黑白',
                         onClick: this.handleSwapPlayers
                     }),
 
@@ -369,19 +376,19 @@ class InfoDrawer extends Component {
                         h('input', {
                             type: 'text',
                             name: 'name_-1',
-                            placeholder: 'White',
+                            placeholder: '白方选手',
                             value: whiteName,
                             onInput: this.handleInputChange.whiteName
                         }),
-
+                        /*
                         h('input', {
                             type: 'text',
                             name: 'rank_-1',
-                            placeholder: 'Rank',
+                            placeholder: '级别',
                             value: whiteRank,
                             onInput: this.handleInputChange.whiteRank
                         }), ' ',
-
+						*/
                         h('img', {
                             src: './node_modules/octicons/build/svg/chevron-down.svg',
                             width: 16,
@@ -393,27 +400,30 @@ class InfoDrawer extends Component {
                 ),
 
                 h('ul', {},
-                    h(InfoDrawerItem, {title: 'Name'},
+                    /*
+                    h(InfoDrawerItem, {title: '棋局名'},
                         h('input', {
                             type: 'text',
-                            placeholder: '(Unnamed)',
+                            placeholder: '',
                             value: gameName,
                             onInput: this.handleInputChange.gameName
                         })
                     ),
-                    h(InfoDrawerItem, {title: 'Event'},
+                    
+                    h(InfoDrawerItem, {title: '赛事'},
                         h('input', {
                             type: 'text',
-                            placeholder: 'None',
+                            placeholder: '',
                             value: eventName,
                             onInput: this.handleInputChange.eventName
                         })
                     ),
-                    h(InfoDrawerItem, {title: 'Date'},
+                    */
+                    h(InfoDrawerItem, {title: '日期'},
                         h('input', {
                             ref: el => this.dateInputElement = el,
                             type: 'text',
-                            placeholder: 'None',
+                            placeholder: '',//
                             value: date,
 
                             onFocus: this.handleDateInputFocus,
@@ -421,7 +431,7 @@ class InfoDrawer extends Component {
                             onInput: this.handleDateInputChange
                         })
                     ),
-                    h(InfoDrawerItem, {title: 'Komi'},
+                    h(InfoDrawerItem, {title: '贴目'},
                         h('input', {
                             type: 'number',
                             name: 'komi',
@@ -431,11 +441,11 @@ class InfoDrawer extends Component {
                             onInput: this.handleInputChange.komi
                         })
                     ),
-                    h(InfoDrawerItem, {title: 'Result'},
+                    h(InfoDrawerItem, {title: '结果'},
                         showResult 
                         ? h('input', {
                             type: 'text',
-                            placeholder: 'None',
+                            placeholder: ' ',//
                             value: result,
                             onInput: this.handleInputChange.result
                         })
@@ -444,7 +454,7 @@ class InfoDrawer extends Component {
                             onClick: this.handleShowResultClick
                         }, 'Show')
                     ),
-                    h(InfoDrawerItem, {title: 'Handicap'},
+                    h(InfoDrawerItem, {title: '让子'},
                         h('select',
                             {
                                 selectedIndex: Math.max(0, handicap - 1),
@@ -452,13 +462,13 @@ class InfoDrawer extends Component {
                                 onChange: this.handleInputChange.handicap
                             },
 
-                            h('option', {value: 0}, 'No stones'),
+                            h('option', {value: 0}, '分先'),//
                             [...Array(8)].map((_, i) =>
-                                h('option', {value: i + 2}, (i + 2) + ' stones')
+                                h('option', {value: i + 2}, (i + 2) + ' 子')//
                             )
                         )
                     ),
-                    h(InfoDrawerItem, {title: 'Board Size'},
+                    h(InfoDrawerItem, {title: '棋盘大小'},
                         h('input', {
                             type: 'number',
                             name: 'size-width',
@@ -491,8 +501,8 @@ class InfoDrawer extends Component {
                 ),
 
                 h('p', {},
-                    h('button', {type: 'submit', onClick: this.handleSubmitButtonClick}, 'OK'), ' ',
-                    h('button', {type: 'reset', onClick: this.handleCancelButtonClick}, 'Cancel')
+                    h('button', {type: 'submit', onClick: this.handleSubmitButtonClick}, '确定'), ' ',
+                    h('button', {type: 'reset', onClick: this.handleCancelButtonClick}, '取消')
                 )
             )
         )
